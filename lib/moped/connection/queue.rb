@@ -6,7 +6,6 @@ module Moped
     #
     # @since 2.0.0
     class Queue
-
       # Initialize a queue with the provided size.
       #
       # @example Instantiate the queue.
@@ -15,10 +14,10 @@ module Moped
       # @param [ Integer ] size The number of connections in the queue.
       #
       # @since 2.0.0
-      def initialize(size)
+      def initialize(size, monitor = Monitor.new)
         @queue = Array.new(size) { yield }
-        @mutex = Mutex.new
-        @resource = ConditionVariable.new
+        @monitor = monitor
+        @cond = @monitor.new_cond
       end
 
       # Push a connection on the queue.
@@ -30,9 +29,9 @@ module Moped
       #
       # @since 2.0.0
       def push(connection)
-        mutex.synchronize do
+        @monitor.synchronize do
           queue.push(connection)
-          resource.broadcast
+          @cond.signal
         end
       end
 
@@ -47,7 +46,7 @@ module Moped
       #
       # @since 2.0.0
       def pop(timeout = 0.5)
-        mutex.synchronize do
+        @monitor.synchronize do
           wait_for_next(Time.now + timeout)
         end
       end
@@ -78,14 +77,14 @@ module Moped
 
       private
 
-      attr_reader :queue, :mutex, :resource
+      attr_reader :queue
 
       def wait_for_next(deadline)
         loop do
           return queue.pop unless queue.empty?
           wait = deadline - Time.now
           raise Timeout::Error, "Waited for item but none was pushed." if wait <= 0
-          resource.wait(mutex, wait)
+          @cond.wait(wait)
         end
       end
     end

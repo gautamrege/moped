@@ -143,13 +143,13 @@ describe Moped::Connection::Pool do
 
           context "when reaping frees new connections" do
 
-            let!(:thread_one) do
+            let(:thread_one) do
               Thread.new do
                 pool.checkout
               end
             end
 
-            let!(:thread_two) do
+            let(:thread_two) do
               Thread.new do
                 pool.checkout
               end

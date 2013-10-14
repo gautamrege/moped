@@ -35,7 +35,7 @@ module Moped
       #
       # @since 2.0.0
       def checkout
-        mutex.synchronize do
+        synchronize do
           connection = pinned[thread_id]
           if connection
             unless connection.expired?
@@ -60,7 +60,7 @@ module Moped
       #
       # @since 2.0.0
       def checkin(connection)
-        mutex.synchronize do
+        synchronize do
           expire(connection)
         end
       end
@@ -78,15 +78,17 @@ module Moped
         @port = port
         @options = options
         @reaper = Reaper.new(options[:reap_interval] || Reaper::INTERVAL, self)
-        @mutex = Mutex.new
-        @resource = ConditionVariable.new
+        @monitor = Monitor.new
         @pinned = {}
-        @unpinned = Queue.new(max_size) do
+        @unpinned = Queue.new(max_size, @monitor) do
           Connection.new(host, port, options[:timeout] || Connection::TIMEOUT, options)
         end
         reaper.start
       end
 
+      def synchronize
+        @monitor.synchronize { yield }
+      end
       # Get the max size for the connection pool.
       #
       # @example Get the max size.
@@ -110,12 +112,14 @@ module Moped
       #
       # @since 2.0.0
       def reap(ids = active_threads)
-        pinned.each do |id, conn|
-          unless ids.include?(id)
-            conn.expire
-            unpinned.push(pinned.delete(id))
-          end
-        end and self
+        synchronize do
+          pinned.each do |id, conn|
+            unless ids.include?(id)
+              conn.expire
+              unpinned.push(pinned.delete(id))
+            end
+          end and self
+        end
       end
 
       # Get the current size of the connection pool. Is the total of pinned
@@ -165,7 +169,7 @@ module Moped
 
       private
 
-      attr_reader :mutex, :resource, :pinned, :unpinned
+      attr_reader :pinned, :unpinned
 
       def expire(connection)
         connection.expire
@@ -183,7 +187,7 @@ module Moped
       end
 
       def saturated?
-        size == max_size
+        unpinned.empty?
       end
 
       def thread_id
